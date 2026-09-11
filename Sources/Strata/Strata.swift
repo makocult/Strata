@@ -30,10 +30,10 @@ struct MindNode: Identifiable, Codable, Equatable { let id: UUID; var title: Str
 
 
 struct ContentView:View{
- @ObservedObject var store:MindMapStore;@State private var editing:UUID?;@State private var draft="";@State private var showText=false
- var body:some View{VStack(spacing:0){HStack{Button("打开"){open()};Button("保存"){save()};Button("末级转纯文本"){showText=true};Spacer()}.padding(8);Divider();ScrollView([.horizontal,.vertical]){NodeView(node:store.root,store:store,editing:$editing,draft:$draft).padding(50)}}.onDeleteCommand{store.delete()}.sheet(isPresented:$showText){VStack{Text("末级节点").font(.headline);TextEditor(text:.constant(store.leaves())).frame(minWidth:500,minHeight:300);Button("关闭"){showText=false}}.padding()}}
- func save(){let p=NSSavePanel();p.allowedContentTypes=[.json];p.nameFieldStringValue="Strata.json";if p.runModal() == .OK,let u=p.url{try?store.save(u)}}
- func open(){let p=NSOpenPanel();p.allowedContentTypes=[.json];if p.runModal() == .OK,let u=p.url{try?store.open(u)}}
+ @ObservedObject var store:MindMapStore;@State private var editing:UUID?;@State private var draft="";@State private var showText=false;@State private var error=""
+ var body:some View{VStack(spacing:0){HStack{Button("打开"){open()};Button("保存"){save()};Button("末级转纯文本"){showText=true};Spacer()}.padding(8);Divider();ScrollView([.horizontal,.vertical]){NodeView(node:store.root,store:store,editing:$editing,draft:$draft).padding(50)}}.onDeleteCommand{store.delete()}.alert("操作失败",isPresented:Binding(get:{!error.isEmpty},set:{if !$0{error=""}})){Button("确定"){error=""}}message:{Text(error)}.sheet(isPresented:$showText){VStack{Text("末级节点").font(.headline);TextEditor(text:.constant(store.leaves())).frame(minWidth:500,minHeight:300);HStack{Button("复制"){NSPasteboard.general.clearContents();NSPasteboard.general.setString(store.leaves(),forType:.string)};Button("关闭"){showText=false}}}.padding()}}
+ func save(){let p=NSSavePanel();p.allowedContentTypes=[.json];p.nameFieldStringValue="Strata.json";if p.runModal() == .OK,let u=p.url{do{try store.save(u)}catch{error=error.localizedDescription}}}
+ func open(){let p=NSOpenPanel();p.allowedContentTypes=[.json];if p.runModal() == .OK,let u=p.url{do{try store.open(u)}catch{error=error.localizedDescription}}}
 }
 
 struct NodeView:View{

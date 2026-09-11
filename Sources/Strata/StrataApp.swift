@@ -12,9 +12,7 @@ struct StrataApp: App {
         .commands {
             CommandGroup(after: .undoRedo) {
                 Button("新建子节点") { store.addChild() }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                Button("新建同级节点") { store.addSibling() }
-                    .keyboardShortcut(.return, modifiers: [])
+                    .keyboardShortcut(.tab, modifiers: [])
             }
         }
     }
