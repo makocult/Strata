@@ -13,7 +13,11 @@ struct MindNode: Identifiable, Codable, Equatable { let id: UUID; var title: Str
  func addSibling(){ guard let id=selectedID, id != root.id, let p=parent(id) else{return}; update(p){ n in if let i=n.children.firstIndex(where:{$0.id==id}){n.children.insert(MindNode(title:"新节点"),at:i+1)} }; selectedID=node(p)?.children.first(where:{$0.title=="新节点"})?.id }
  func delete(){ guard let id=selectedID,id != root.id,let p=parent(id) else{return}; update(p){$0.children.removeAll{$0.id==id}};selectedID=p }
  func rename(_ text:String){guard let id=selectedID else{return};update(id){$0.title=text}}
- func move(_ id:UUID,to parentID:UUID,index:Int?=nil){guard id != parentID,let value=remove(id,&root),find(parentID,root) != nil else{return};update(parentID){p in let i=min(index ?? p.children.count,p.children.count);p.children.insert(value,at:i)};selectedID=id}
+ func move(_ id:UUID,to parentID:UUID,index:Int?=nil){guard id != parentID, !isAncestor(id, of: parentID), let value=remove(id,&root),find(parentID,root) != nil else{return};update(parentID){p in let i=min(index ?? p.children.count,p.children.count);p.children.insert(value,at:i)};selectedID=id}
+ func moveBefore(_ id: UUID, _ target: UUID) { moveRelative(id, target, after: false) }
+ func moveAfter(_ id: UUID, _ target: UUID) { moveRelative(id, target, after: true) }
+ private func moveRelative(_ id: UUID, _ target: UUID, after: Bool) { guard id != target, !isAncestor(id, of: target), let value = remove(id, &root), let p = parent(target) else { return }; update(p) { n in guard let i = n.children.firstIndex(where: {$0.id == target}) else { return }; n.children.insert(value, at: after ? i + 1 : i) }; selectedID = id }
+ private func isAncestor(_ ancestor: UUID, of descendant: UUID) -> Bool { guard let n = find(ancestor, root) else { return false }; return find(descendant, n) != nil }
  func leaves()->String{leaf(root).joined(separator:"\n")}
  func save(_ url:URL)throws{try JSONEncoder().encode(root).write(to:url,options:.atomic)}
  func open(_ url:URL)throws{root=try JSONDecoder().decode(MindNode.self,from:Data(contentsOf:url));selectedID=root.id}
@@ -37,4 +41,20 @@ struct NodeView:View{
  var body:some View{VStack(alignment:.leading,spacing:18){nodeLabel;if !node.children.isEmpty{HStack(alignment:.top,spacing:28){ForEach(node.children){c in NodeView(node:c,store:store,editing:$editing,draft:$draft).onDrag{NSItemProvider(object:c.id.uuidString as NSString)}.onDrop(of:[.text],delegate:NodeDropDelegate(target:c.id,store:store))}}}}}
  @ViewBuilder var nodeLabel:some View{if editing==node.id{TextField("节点",text:$draft,onCommit:{store.rename(draft);editing=nil}).textFieldStyle(.roundedBorder).frame(width:160).onAppear{draft=node.title}}else{Text(node.title).padding(10).background(node.id==store.selectedID ? Color.accentColor.opacity(0.3):Color.secondary.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius:8)).onTapGesture{store.selectedID=node.id}.onTapGesture(count:2){editing=node.id;draft=node.title}.onKeyPress(.return){store.addSibling();return .handled}.onKeyPress(.tab){store.addChild();return .handled}}}
 }
-struct NodeDropDelegate:DropDelegate{let target:UUID;let store:MindMapStore;func performDrop(info:DropInfo)->Bool{guard let p=info.itemProviders(for:[.text]).first else{return false};p.loadObject(ofClass:NSString.self){o,_ in guard let s=o as? String,let id=UUID(uuidString:s) else{return};Task{@MainActor in store.move(id,to:target)}};return true}}
+struct NodeDropDelegate: DropDelegate {
+ let target: UUID; let store: MindMapStore
+ func dropEntered(info: DropInfo) { }
+ func performDrop(info: DropInfo) -> Bool {
+  guard let p = info.itemProviders(for: [.text]).first else { return false }
+  let point = info.location
+  p.loadObject(ofClass: NSString.self) { object, _ in
+   guard let s = object as? String, let id = UUID(uuidString: s) else { return }
+   Task { @MainActor in
+    if point.y < 14 { store.moveBefore(id, target) }
+    else if point.y > 34 { store.moveAfter(id, target) }
+    else { store.move(id, to: target) }
+   }
+  }
+  return true
+ }
+}
