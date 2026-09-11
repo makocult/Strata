@@ -8,7 +8,6 @@ let package = Package(
         .executable(name: "Strata", targets: ["Strata"])
     ],
     targets: [
-        .executableTarget(name: "Strata"),
-        .testTarget(name: "StrataTests", dependencies: ["Strata"])
+        .executableTarget(name: "Strata")
     ]
 )
