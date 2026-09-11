@@ -1,0 +1,14 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "Strata",
+    platforms: [.macOS(.v14)],
+    products: [
+        .executable(name: "Strata", targets: ["Strata"])
+    ],
+    targets: [
+        .executableTarget(name: "Strata"),
+        .testTarget(name: "StrataTests", dependencies: ["Strata"])
+    ]
+)
