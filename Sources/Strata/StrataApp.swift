@@ -11,6 +11,7 @@ struct StrataApp: App {
                 .frame(minWidth: 1000, minHeight: 680)
         }
         .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 780)
         .commands {
             DocumentCommands(
                 newDocument: { NotificationCenter.default.post(name: .newStrataDocument, object: nil) },
