@@ -81,16 +81,12 @@ struct InteractionSmoke {
         assert(store.node(childID)?.title == "子内容")
         assert(store.selectedID == childID)
 
+        let childIndex = store.node(editable.id)!.children.firstIndex(where: { $0.id == childID })!
+        let countBeforeSibling = store.node(editable.id)!.children.count
         key(canvas, window: window, code: 36)
-        guard let parent = store.node(editable.id), let childIndex = parent.children.firstIndex(where: { $0.id == childID }) else {
-            assertionFailure("Committed child must remain in the tree")
-            return
-        }
-        let siblingIndex = childIndex + 1
-        assert(parent.children.indices.contains(siblingIndex) == false, "Store snapshot before refresh should not be reused")
         let refreshedParent = store.node(editable.id)!
-        assert(refreshedParent.children.indices.contains(siblingIndex))
-        let siblingID = refreshedParent.children[siblingIndex].id
+        assert(refreshedParent.children.count == countBeforeSibling + 1)
+        let siblingID = refreshedParent.children[childIndex + 1].id
         assert(store.selectedID == siblingID && canvas.editingID == siblingID)
         print("PASS: first Enter commits; the next Enter creates an editable sibling")
     }
