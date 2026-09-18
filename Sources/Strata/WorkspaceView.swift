@@ -25,6 +25,7 @@ struct WorkspaceView: View {
     var body: some View {
         VStack(spacing: 0) {
             WorkspaceTopBar(
+                store: store,
                 orientation: $orientation,
                 libraryVisible: showLibrary,
                 isGenerating: ai.isGenerating,
@@ -209,6 +210,7 @@ struct WorkspaceView: View {
 }
 
 private struct WorkspaceTopBar: View {
+    @ObservedObject var store: MindMapStore
     @Binding var orientation: StrataLayoutOrientation
     let libraryVisible: Bool
     let isGenerating: Bool
@@ -244,6 +246,10 @@ private struct WorkspaceTopBar: View {
                 ToolbarAction(title: "清空", systemImage: "trash", action: clearDocument)
                     .help("清空当前画布")
                     .accessibilityIdentifier("clear-document")
+                ToolbarAction(title: "撤销", systemImage: "arrow.left.curved", disabled: !store.canUndo, action: { store.undo() })
+                    .help("撤销上一步（⌘Z）")
+                ToolbarAction(title: "重做", systemImage: "arrow.right.curved", disabled: !store.canRedo, action: { store.redo() })
+                    .help("重复上一步（⌘Shift+Z）")
             }
 
             ToolbarSeparator()
@@ -417,7 +423,7 @@ private struct WorkspaceSidebar: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("快捷提示")
                         .font(.system(size: 11.5, weight: .semibold))
-                    Text("Enter 新建同级 · Tab 新建子级")
+                    Text("⌘Z 撤销 · ⌘Shift+Z 重做 · Tab 新建子级")
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
                 }

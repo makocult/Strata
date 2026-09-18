@@ -244,6 +244,14 @@ final class MindMapStore: ObservableObject {
     @Published var root: MindNode
     @Published var selectedID: UUID?
     @Published private(set) var focusRequest: CanvasFocusRequest?
+    @Published private(set) var undoGeneration = 0
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    private let maxUndoDepth = 100
+    private var undoStack: [MindNode] = []
+    private var redoStack: [MindNode] = []
 
     init(root: MindNode = MindNode(title: "主题")) {
         self.root = root
@@ -256,6 +264,7 @@ final class MindMapStore: ObservableObject {
 
     func reset() {
         let root = MindNode(title: "主题")
+        recordUndo()
         self.root = root
         selectedID = root.id
         requestFocus(on: root.id)
@@ -329,6 +338,7 @@ final class MindMapStore: ObservableObject {
         guard node(parentID) != nil, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 
         let child = MindNode(title: title)
+        recordUndo()
         guard update(parentID, in: &root, { $0.children.append(child) }) else { return nil }
         selectedID = child.id
         requestFocus(on: child.id, activateCanvas: true)
@@ -346,6 +356,7 @@ final class MindMapStore: ObservableObject {
         }
 
         let sibling = MindNode(title: "新节点")
+        recordUndo()
         guard update(parentID, in: &root, { $0.children.insert(sibling, at: index + 1) }) else {
             return nil
         }
@@ -358,6 +369,8 @@ final class MindMapStore: ObservableObject {
     func rename(_ nodeID: UUID, to title: String) -> Bool {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedTitle.isEmpty else { return false }
+        guard node(nodeID) != nil else { return false }
+        recordUndo()
         return update(nodeID, in: &root) { $0.title = normalizedTitle }
     }
 
@@ -368,6 +381,7 @@ final class MindMapStore: ObservableObject {
 
         var candidate = root
         guard remove(nodeID, from: &candidate) != nil else { return nil }
+        recordUndo()
         root = candidate
         var target = root
         if let selected = node(selectedID) {
@@ -428,6 +442,7 @@ final class MindMapStore: ObservableObject {
             return false
         }
 
+        recordUndo()
         root = candidate
         selectedID = sourceID
         revealAncestors(of: sourceID)
@@ -453,9 +468,43 @@ final class MindMapStore: ObservableObject {
     }
 
     func replaceRoot(with root: MindNode) {
+        recordUndo()
         self.root = root
         selectedID = root.id
         requestFocus(on: root.id)
+    }
+
+    /// Pushes the current document onto the undo history so the next edit
+    /// clears the redo stack, mirroring standard text-editor behavior.
+    private func recordUndo() {
+        undoStack.append(root)
+        if undoStack.count > maxUndoDepth { undoStack.removeFirst() }
+        redoStack.removeAll()
+        undoGeneration += 1
+    }
+
+    @discardableResult
+    func undo() -> Bool {
+        guard !undoStack.isEmpty else { return false }
+        let previous = undoStack.removeFirst()
+        redoStack.append(root)
+        root = previous
+        if node(selectedID) == nil { selectedID = root.id }
+        focusRequest = CanvasFocusRequest(nodeID: root.id, activateCanvas: true)
+        undoGeneration += 1
+        return true
+    }
+
+    @discardableResult
+    func redo() -> Bool {
+        guard !redoStack.isEmpty else { return false }
+        let next = redoStack.removeFirst()
+        undoStack.append(root)
+        root = next
+        if node(selectedID) == nil { selectedID = root.id }
+        focusRequest = CanvasFocusRequest(nodeID: root.id, activateCanvas: true)
+        undoGeneration += 1
+        return true
     }
 
     func save(_ url: URL) throws {
@@ -466,8 +515,10 @@ final class MindMapStore: ObservableObject {
 
     func open(_ url: URL) throws {
         let decoded = try JSONDecoder().decode(MindNode.self, from: Data(contentsOf: url))
+        recordUndo()
         root = decoded
         selectedID = decoded.id
+        requestFocus(on: decoded.id)
     }
 
     private func find(_ id: UUID, in node: MindNode) -> MindNode? {

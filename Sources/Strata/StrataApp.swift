@@ -14,6 +14,7 @@ struct StrataApp: App {
         .defaultSize(width: 1280, height: 780)
         .commands {
             DocumentCommands(
+                store: store,
                 newDocument: { NotificationCenter.default.post(name: .newStrataDocument, object: nil) },
                 clearDocument: { NotificationCenter.default.post(name: .clearStrataDocument, object: nil) }
             )

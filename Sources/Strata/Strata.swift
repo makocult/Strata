@@ -193,6 +193,7 @@ struct ContentView: View {
 }
 
 struct DocumentCommands: Commands {
+    let store: MindMapStore
     let newDocument: () -> Void
     let clearDocument: () -> Void
 
@@ -200,6 +201,14 @@ struct DocumentCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("新建工作", action: newDocument)
                 .keyboardShortcut("n", modifiers: .command)
+        }
+        CommandGroup(replacing: .undoRedo) {
+            Button("撤销", action: { store.undo() })
+                .disabled(!store.canUndo)
+                .keyboardShortcut("z", modifiers: [.command])
+            Button("重做", action: { store.redo() })
+                .disabled(!store.canRedo)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
         }
         CommandGroup(after: .pasteboard) {
             Button("清空画布", action: clearDocument)

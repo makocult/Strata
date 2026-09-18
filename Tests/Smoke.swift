@@ -44,6 +44,36 @@ import AppKit
   assert(restored.root.id != previousRootID && restored.isEmptyDocument)
   assert(restored.selectedID == restored.root.id && restored.focusRequest?.nodeID == restored.root.id)
   print("PASS: native responder editing, Tab child, Enter sibling, Delete, reorder, reparent, cycle rejection, sizing, both layouts/connectors, export, JSON round trip, document reset")
+  // Undo/Redo
+  let undoStore = MindMapStore()
+  let state0 = undoStore.root
+  assert(!undoStore.canUndo && !undoStore.canRedo, "Fresh document must have no undo or redo")
+  _ = undoStore.createChild(of: undoStore.root.id)!
+  let state1 = undoStore.root
+  assert(undoStore.root.children.count == 1)
+  assert(undoStore.canUndo && !undoStore.canRedo, "Create child must enable undo and not redo")
+  assert(undoStore.undo(), "Undo must succeed after a change")
+  assert(undoStore.root == state0, "Undo must restore the previous document")
+  assert(!undoStore.canUndo && undoStore.canRedo, "Undo must empty undo and enable redo")
+  assert(undoStore.redo(), "Redo must succeed after undo")
+  assert(undoStore.root == state1, "Redo must restore the undone change")
+  assert(undoStore.canUndo && !undoStore.canRedo)
+  _ = undoStore.createChild(of: undoStore.root.id)!
+  assert(!undoStore.canRedo, "A new edit must clear the redo stack")
+  let afterSecondCreate = undoStore.root
+  assert(undoStore.undo())
+  assert(undoStore.redo())
+  assert(undoStore.root == afterSecondCreate, "Redo must restore the latest edit")
+  // Undo of a destructive delete restores the subtree
+  let deleteStore = MindMapStore(root: MindNode(title: "Root", children: [MindNode(title: "Keep"), MindNode(title: "Drop", children: [MindNode(title: "Deep")])]))
+  let dropID = deleteStore.root.children[1].id
+  assert(deleteStore.delete(dropID) != nil)
+  assert(deleteStore.root.children.count == 1, "Delete must remove the branch")
+  assert(deleteStore.canUndo && !deleteStore.canRedo)
+  assert(deleteStore.undo())
+  assert(deleteStore.root.children.count == 2, "Undo must restore the deleted branch and its descendants")
+  assert(deleteStore.node(dropID) != nil, "The restored branch must keep its descendants")
+  print("PASS: undo/redo restore structure, new edits clear redo, and destructive deletes are recoverable")
   let scroll = NSScrollView(frame: NSRect(x:0,y:0,width:900,height:620))
   window.contentView = scroll; scroll.documentView = canvas; canvas.refresh(); canvas.centerRoot()
   let rootFrame = canvas.card(store.root.id)!
