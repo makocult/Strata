@@ -1,2 +1,13 @@
 .build/
 .DS_Store
+
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+credentials.json
+secrets.json
