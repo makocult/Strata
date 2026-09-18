@@ -55,26 +55,26 @@ struct MaterialCanvasSmoke {
         for scale: CGFloat in [0.25, 1, 3] {
             scroll.zoom(to: scale, at: CGPoint(x: scroll.contentView.bounds.midX, y: scroll.contentView.bounds.midY))
             canvas.centerNode(branch.id)
-            for width: CGFloat in [667, 1000] {
+            for width: CGFloat in [640, 1000] {
                 scroll.setFrameSize(CGSize(width: width, height: 700))
                 scroll.layoutSubtreeIfNeeded()
                 let rect = canvas.card(branch.id)!
-                assert(abs(rect.midX - scroll.contentView.bounds.midX) < 2 && abs(rect.midY - scroll.contentView.bounds.midY) < 2, "Opening and closing the sidebar must preserve the canvas center")
+                assert(abs(rect.midX - scroll.contentView.bounds.midX) < 2 && abs(rect.midY - scroll.contentView.bounds.midY) < 2, "Opening and closing sidebars must preserve the canvas center")
                 assert(scroll.magnification == scale)
             }
         }
         print("PASS: sidebar width changes preserve the canvas center and magnification")
 
-        let card = NSHostingView(rootView: MaterialCard(material: material, canInsert: true, insert: {}, edit: {}, delete: {}).frame(width: 144))
+        let card = NSHostingView(rootView: MaterialCard(material: material, canInsert: true, insert: {}, edit: {}, delete: {}).frame(width: 320))
         let size = card.fittingSize
-        assert(abs(size.width - 144) < 1 && abs(size.height - 144) < 1, "Material cards must stay 1:1 regardless of text length")
+        assert(abs(size.width - 320) < 1 && abs(size.height - 92) < 1, "Material cards must keep the compact list-row height")
         let longMaterial = LibraryMaterial(title: String(repeating: "很长的标题", count: 50), content: String(repeating: "很长的正文\n", count: 500))
-        let longCard = NSHostingView(rootView: MaterialCard(material: longMaterial, canInsert: false, insert: {}, edit: {}, delete: {}).frame(width: 144))
-        assert(abs(longCard.fittingSize.height - 144) < 1, "Long text must not stretch the square card")
+        let longCard = NSHostingView(rootView: MaterialCard(material: longMaterial, canInsert: false, insert: {}, edit: {}, delete: {}).frame(width: 320))
+        assert(abs(longCard.fittingSize.height - 92) < 1, "Long text must not stretch the compact material row")
         let sheet = NSHostingView(rootView: MaterialEditorSheet(library: library, draft: MaterialDraft(material: material), saved: {}))
-        assert(sheet.fittingSize.width >= 520 && sheet.fittingSize.height >= 460)
+        assert(sheet.fittingSize.width >= 540 && sheet.fittingSize.height >= 480)
         let panel = NSHostingView(rootView: MaterialLibraryPanel(library: library, store: store, close: {}).frame(height: 620))
-        assert(abs(panel.fittingSize.width - 332) < 1)
-        print("PASS: native SwiftUI layout for square cards, long-text clipping, editor sheet and sidebar width")
+        assert(abs(panel.fittingSize.width - 360) < 1)
+        print("PASS: native SwiftUI layout for compact material rows, long-text clipping, editor sheet and sidebar width")
     }
 }

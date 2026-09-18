@@ -7,9 +7,11 @@ struct StrataApp: App {
 
     var body: some Scene {
         WindowGroup("Strata") {
-            ContentView(store: store, library: library)
-                .frame(minWidth: 900, minHeight: 620)
+            WorkspaceView(store: store, library: library)
+                .frame(minWidth: 1000, minHeight: 680)
         }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 780)
         .commands {
             DocumentCommands(
                 newDocument: { NotificationCenter.default.post(name: .newStrataDocument, object: nil) },
