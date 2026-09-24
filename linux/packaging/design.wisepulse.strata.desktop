@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Strata
+Comment=Local-first hierarchical mind map editor
+Comment[zh_CN]=本地优先的层级思维导图编辑器
+Exec=strata %f
+Icon=design.wisepulse.strata
+Terminal=false
+Categories=Office;
+StartupWMClass=Strata
+Keywords=mindmap;outline;思维导图;

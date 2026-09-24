@@ -11,3 +11,9 @@
 *.mobileprovision
 credentials.json
 secrets.json
+
+# Linux build and test caches
+__pycache__/
+*.pyc
+linux/dist/
+linux/.venv/
