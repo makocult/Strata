@@ -2,6 +2,8 @@
 
 本地优先的极简层级思维导图编辑器，重点是稳定的树编辑交互，而不是自由画布功能。
 
+> **下载 macOS 版**：[GitHub Releases](https://github.com/makocult/Strata/releases) — 解压 zip 后，若 Gatekeeper 拦截，请在 Finder 中右键 Strata.app →「打开」。
+
 ## Linux 桌面版
 
 新增独立的 Qt 原生 Linux 版，现有 macOS 版保持不变。安装包、支持范围、
