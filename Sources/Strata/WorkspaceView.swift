@@ -15,6 +15,7 @@ struct WorkspaceView: View {
     @State private var confirmOptimize = false
     @State private var optimizeTask: Task<Void, Never>?
     @StateObject private var ai = AIWorkflow()
+    @StateObject private var canvasBridge = CanvasBridge()
 
     enum ResetAction: String, Identifiable {
         case new = "新建工作"
@@ -32,6 +33,8 @@ struct WorkspaceView: View {
                 isOptimizing: ai.isOptimizing,
                 canOptimize: !store.isEmptyDocument && !ai.isGenerating && !ai.isOptimizing && !ai.configuration.model.isEmpty,
                 canCopy: !store.isEmptyDocument,
+                canAnnotate: canvasBridge.selectedNodeCount >= 2,
+                annotate: { canvasBridge.requestAnnotation() },
                 newDocument: { requestReset(.new) },
                 clearDocument: { requestReset(.clear) },
                 openDocument: open,
@@ -54,7 +57,7 @@ struct WorkspaceView: View {
                 Divider()
 
                 ZStack(alignment: .bottomLeading) {
-                    NativeCanvas(store: store, orientation: orientation)
+                    NativeCanvas(store: store, orientation: orientation, bridge: canvasBridge)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     CanvasHint()
@@ -217,6 +220,8 @@ private struct WorkspaceTopBar: View {
     let isOptimizing: Bool
     let canOptimize: Bool
     let canCopy: Bool
+    let canAnnotate: Bool
+    let annotate: () -> Void
     let newDocument: () -> Void
     let clearDocument: () -> Void
     let openDocument: () -> Void
@@ -246,9 +251,9 @@ private struct WorkspaceTopBar: View {
                 ToolbarAction(title: "清空", systemImage: "trash", action: clearDocument)
                     .help("清空当前画布")
                     .accessibilityIdentifier("clear-document")
-                ToolbarAction(title: "撤销", systemImage: "arrow.left.curved", disabled: !store.canUndo, action: { store.undo() })
+                ToolbarAction(title: "撤销", systemImage: "arrow.uturn.left", disabled: !store.canUndo, action: { store.undo() })
                     .help("撤销上一步（⌘Z）")
-                ToolbarAction(title: "重做", systemImage: "arrow.right.curved", disabled: !store.canRedo, action: { store.redo() })
+                ToolbarAction(title: "重做", systemImage: "arrow.uturn.right", disabled: !store.canRedo, action: { store.redo() })
                     .help("重复上一步（⌘Shift+Z）")
             }
 
@@ -272,6 +277,13 @@ private struct WorkspaceTopBar: View {
                     .help("根据材料生成思维导图")
                 ToolbarAction(title: "优化", systemImage: "wand.and.stars", disabled: !canOptimize, action: optimizeWithAI)
                     .help("将当前思考结构整理为可直接使用的提示词")
+            }
+
+            ToolbarSeparator()
+
+            HStack(spacing: 4) {
+                ToolbarAction(title: "标注", systemImage: "text.badge.plus", disabled: !canAnnotate, action: annotate)
+                    .help("为选中的多个节点添加大括号备注")
             }
 
             CopyPromptButton(disabled: !canCopy, action: copyPrompt)

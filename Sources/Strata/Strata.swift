@@ -219,12 +219,15 @@ struct DocumentCommands: Commands {
 struct NativeCanvas: NSViewRepresentable {
     let store: MindMapStore
     let orientation: StrataLayoutOrientation
+    var bridge: CanvasBridge?
+
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = CanvasScrollView()
         scroll.hasHorizontalScroller = true; scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         let canvas = MindCanvas(store: store)
         scroll.documentView = canvas
+        if let bridge { canvas.attachBridge(bridge) }
         canvas.refresh()
         return scroll
     }

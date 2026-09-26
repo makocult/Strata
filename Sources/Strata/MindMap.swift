@@ -26,6 +26,21 @@ struct MindNode: Identifiable, Codable, Equatable {
     }
 }
 
+/// A note attached to a group of nodes, drawn as a brace beside the group and
+/// exported as a remark for those nodes. Members are tracked by stable IDs, so
+/// the group survives edits, moves and undo/redo.
+struct GroupAnnotation: Identifiable, Codable, Equatable {
+    let id: UUID
+    var memberIDs: [UUID]
+    var label: String
+
+    init(id: UUID = UUID(), memberIDs: [UUID], label: String) {
+        self.id = id
+        self.memberIDs = memberIDs
+        self.label = label
+    }
+}
+
 enum DropPlacement: Equatable {
     case before
     case inside
@@ -241,7 +256,15 @@ struct CanvasFocusRequest: Equatable {
 
 @MainActor
 final class MindMapStore: ObservableObject {
+    /// Document snapshot used by undo/redo. Selection is stored separately so
+    /// pure selection changes never pollute the edit history.
+    struct HistoryEntry: Equatable {
+        var root: MindNode
+        var annotations: [GroupAnnotation]
+    }
+
     @Published var root: MindNode
+    @Published private(set) var annotations: [GroupAnnotation] = []
     @Published var selectedID: UUID?
     @Published private(set) var focusRequest: CanvasFocusRequest?
     @Published private(set) var undoGeneration = 0
@@ -250,12 +273,16 @@ final class MindMapStore: ObservableObject {
     var canRedo: Bool { !redoStack.isEmpty }
 
     private let maxUndoDepth = 100
-    private var undoStack: [MindNode] = []
-    private var redoStack: [MindNode] = []
+    private var undoStack: [HistoryEntry] = []
+    private var redoStack: [HistoryEntry] = []
 
     init(root: MindNode = MindNode(title: "主题")) {
         self.root = root
         selectedID = root.id
+    }
+
+    var currentSnapshot: HistoryEntry {
+        HistoryEntry(root: root, annotations: annotations)
     }
 
     var isEmptyDocument: Bool {
@@ -266,6 +293,7 @@ final class MindMapStore: ObservableObject {
         let root = MindNode(title: "主题")
         recordUndo()
         self.root = root
+        annotations = []
         selectedID = root.id
         requestFocus(on: root.id)
     }
@@ -367,11 +395,46 @@ final class MindMapStore: ObservableObject {
 
     @discardableResult
     func rename(_ nodeID: UUID, to title: String) -> Bool {
-        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedTitle.isEmpty else { return false }
-        guard node(nodeID) != nil else { return false }
+        rename(nodeID, to: title, inEditSession: false)
+    }
+
+    /// Deletes several branches in one undo step, ordered deepest first so
+    /// nested members never invalidate their ancestors' removal. Returns the
+    /// resulting selection.
+    @discardableResult
+    func delete(_ nodeIDs: [UUID]) -> UUID? {
+        let targets = nodeIDs
+            .filter { $0 != root.id }
+            .sorted { depth(of: $0) > depth(of: $1) }
+        guard !targets.isEmpty else { return nil }
+
+        var candidate = root
+        for id in targets where find(id, in: candidate) != nil {
+            guard remove(id, from: &candidate) != nil else { continue }
+        }
         recordUndo()
-        return update(nodeID, in: &root) { $0.title = normalizedTitle }
+        root = candidate
+        pruneStaleAnnotations()
+        var target = root
+        if let selected = node(selectedID) {
+            target = selected
+        } else {
+            while let last = target.children.last { target = last }
+        }
+        selectedID = target.id
+        requestFocus(on: target.id)
+        return target.id
+    }
+
+    private func depth(of id: UUID) -> Int {
+        func visit(_ node: MindNode, _ level: Int) -> Int? {
+            if node.id == id { return level }
+            for child in node.children {
+                if let found = visit(child, level + 1) { return found }
+            }
+            return nil
+        }
+        return visit(root, 0) ?? 0
     }
 
     /// Keeps a surviving selection, otherwise selects the last leaf in tree order.
@@ -383,6 +446,7 @@ final class MindMapStore: ObservableObject {
         guard remove(nodeID, from: &candidate) != nil else { return nil }
         recordUndo()
         root = candidate
+        pruneStaleAnnotations()
         var target = root
         if let selected = node(selectedID) {
             target = selected
@@ -398,6 +462,14 @@ final class MindMapStore: ObservableObject {
     /// All references are validated before the source is removed.
     @discardableResult
     func move(_ sourceID: UUID, relativeTo targetID: UUID, placement: DropPlacement) -> Bool {
+        move(sourceID, relativeTo: targetID, placement: placement, additionalIDs: [])
+    }
+
+    /// Moves the pressed branch plus any extra selected branches in a single
+    /// undo step. Extra branches follow the first one and keep their relative
+    /// order; inside drops append them under the target.
+    @discardableResult
+    func move(_ sourceID: UUID, relativeTo targetID: UUID, placement: DropPlacement, additionalIDs: [UUID]) -> Bool {
         guard sourceID != root.id,
               sourceID != targetID,
               let source = node(sourceID),
@@ -436,16 +508,45 @@ final class MindMapStore: ObservableObject {
         }
 
         var candidate = root
-        guard let removed = remove(sourceID, from: &candidate),
-              insert(removed, under: destinationParentID, at: insertionIndex, in: &candidate)
+        guard let movedSource = remove(sourceID, from: &candidate),
+              insert(movedSource, under: destinationParentID, at: insertionIndex, in: &candidate)
         else {
             return false
+        }
+
+        if !additionalIDs.isEmpty {
+            var previousMovedID = sourceID
+            for extraID in additionalIDs {
+                guard extraID != root.id, extraID != sourceID, extraID != targetID,
+                      find(extraID, in: candidate) != nil,
+                      let extra = find(extraID, in: candidate),
+                      !contains(destinationParentID, in: extra)
+                else { continue }
+
+                let insertParentID: UUID
+                let insertIndex: Int
+                if placement == .inside {
+                    insertParentID = destinationParentID
+                    insertIndex = find(destinationParentID, in: candidate)?.children.count ?? 0
+                } else {
+                    guard let parent = parent(of: previousMovedID, in: candidate),
+                          let index = parent.children.firstIndex(where: { $0.id == previousMovedID })
+                    else { continue }
+                    insertParentID = parent.id
+                    insertIndex = index + 1
+                }
+                guard let movedExtra = remove(extraID, from: &candidate),
+                      insert(movedExtra, under: insertParentID, at: insertIndex, in: &candidate)
+                else { continue }
+                previousMovedID = extraID
+            }
         }
 
         recordUndo()
         root = candidate
         selectedID = sourceID
         revealAncestors(of: sourceID)
+        pruneStaleAnnotations()
         return true
     }
 
@@ -455,14 +556,28 @@ final class MindMapStore: ObservableObject {
     }
 
     func textExport() -> String {
+        var labelByNodeID: [UUID: [String]] = [:]
+        for annotation in annotations {
+            for memberID in annotation.memberIDs {
+                labelByNodeID[memberID, default: []].append(annotation.label)
+            }
+        }
         func sections(_ node: MindNode, depth: Int) -> [String] {
             let lines = node.title.components(separatedBy: .newlines)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
             let title = lines.joined(separator: node.children.isEmpty ? "\n" : " ")
-            if node.children.isEmpty { return [title] }
-            return [String(repeating: "#", count: depth) + " " + title]
-                + node.children.flatMap { sections($0, depth: depth + 1) }
+            var body = [String]()
+            if node.children.isEmpty {
+                body.append(title)
+            } else {
+                body.append(String(repeating: "#", count: depth) + " " + title)
+                body += node.children.flatMap { sections($0, depth: depth + 1) }
+            }
+            if let labels = labelByNodeID[node.id], !labels.isEmpty, !title.isEmpty {
+                body.append("（备注：" + labels.joined(separator: "；") + "）")
+            }
+            return body
         }
         return sections(root, depth: 1).filter { !$0.isEmpty }.joined(separator: "\n")
     }
@@ -470,25 +585,116 @@ final class MindMapStore: ObservableObject {
     func replaceRoot(with root: MindNode) {
         recordUndo()
         self.root = root
+        annotations = []
         selectedID = root.id
         requestFocus(on: root.id)
+    }
+
+    // MARK: - Group annotations
+
+    /// Creates a brace annotation around the given members. Returns nil when
+    /// fewer than two members remain after removing stale IDs.
+    @discardableResult
+    func addAnnotation(memberIDs: [UUID], label: String) -> UUID? {
+        let members = memberIDs.filter { node($0) != nil }
+        guard members.count >= 2 else { return nil }
+        let annotation = GroupAnnotation(memberIDs: members, label: label)
+        recordUndo()
+        annotations.append(annotation)
+        return annotation.id
+    }
+
+    @discardableResult
+    func updateAnnotation(_ id: UUID, label: String) -> Bool {
+        let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = annotations.firstIndex(where: { $0.id == id }) else { return false }
+        guard !normalized.isEmpty else { return false }
+        guard annotations[index].label != normalized else { return true }
+        recordUndo()
+        annotations[index].label = normalized
+        return true
+    }
+
+    @discardableResult
+    func removeAnnotation(_ id: UUID) -> Bool {
+        guard annotations.contains(where: { $0.id == id }) else { return false }
+        recordUndo()
+        annotations.removeAll { $0.id == id }
+        return true
+    }
+
+    func annotation(_ id: UUID) -> GroupAnnotation? {
+        annotations.first { $0.id == id }
+    }
+
+    /// Drops member IDs that no longer exist; disbands groups left with fewer
+    /// than two members. Called after structural mutations.
+    private func pruneStaleAnnotations() {
+        var didChange = false
+        var kept: [GroupAnnotation] = []
+        for var annotation in annotations {
+            let members = annotation.memberIDs.filter { node($0) != nil }
+            if members.count != annotation.memberIDs.count || members.count < 2 {
+                didChange = true
+            }
+            guard members.count >= 2 else { continue }
+            if members != annotation.memberIDs {
+                annotation.memberIDs = members
+            }
+            kept.append(annotation)
+        }
+        if didChange { annotations = kept }
     }
 
     /// Pushes the current document onto the undo history so the next edit
     /// clears the redo stack, mirroring standard text-editor behavior.
     private func recordUndo() {
-        undoStack.append(root)
+        undoStack.append(currentSnapshot)
         if undoStack.count > maxUndoDepth { undoStack.removeFirst() }
         redoStack.removeAll()
+        openEditSessionBase = nil
         undoGeneration += 1
+    }
+
+    /// Coalesces a continuous edit (inline typing) into a single undo step.
+    /// `beginEditSession()` arms a checkpoint of the document; the first real
+    /// change inside the session pushes that checkpoint onto the undo stack,
+    /// and later changes fold into the same step.
+    private var openEditSessionBase: HistoryEntry?
+
+    func beginEditSession() {
+        if openEditSessionBase == nil {
+            openEditSessionBase = currentSnapshot
+        }
+    }
+
+    /// Renames a node inside the open editing session. When no session is
+    /// open, behaves like a discrete, individually undoable rename.
+    @discardableResult
+    func rename(_ nodeID: UUID, to title: String, inEditSession: Bool) -> Bool {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty else { return false }
+        guard node(nodeID) != nil else { return false }
+        if node(nodeID)?.title == normalizedTitle { return true }
+        if inEditSession, let base = openEditSessionBase {
+            undoStack.append(base)
+            if undoStack.count > maxUndoDepth { undoStack.removeFirst() }
+            redoStack.removeAll()
+            openEditSessionBase = nil
+        } else {
+            recordUndo()
+        }
+        return update(nodeID, in: &root) { $0.title = normalizedTitle }
     }
 
     @discardableResult
     func undo() -> Bool {
         guard !undoStack.isEmpty else { return false }
-        let previous = undoStack.removeFirst()
-        redoStack.append(root)
-        root = previous
+        let previous = undoStack.removeLast()
+        redoStack.append(currentSnapshot)
+        openEditSessionBase = nil
+        root = previous.root
+        annotations = previous.annotations
         if node(selectedID) == nil { selectedID = root.id }
         focusRequest = CanvasFocusRequest(nodeID: root.id, activateCanvas: true)
         undoGeneration += 1
@@ -498,27 +704,45 @@ final class MindMapStore: ObservableObject {
     @discardableResult
     func redo() -> Bool {
         guard !redoStack.isEmpty else { return false }
-        let next = redoStack.removeFirst()
-        undoStack.append(root)
-        root = next
+        let next = redoStack.removeLast()
+        undoStack.append(currentSnapshot)
+        openEditSessionBase = nil
+        root = next.root
+        annotations = next.annotations
         if node(selectedID) == nil { selectedID = root.id }
         focusRequest = CanvasFocusRequest(nodeID: root.id, activateCanvas: true)
         undoGeneration += 1
         return true
     }
 
+    private struct Document: Codable {
+        var root: MindNode
+        var annotations: [GroupAnnotation]
+    }
+
     func save(_ url: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(root).write(to: url, options: .atomic)
+        let document = Document(root: root, annotations: annotations)
+        try encoder.encode(document).write(to: url, options: .atomic)
     }
 
     func open(_ url: URL) throws {
-        let decoded = try JSONDecoder().decode(MindNode.self, from: Data(contentsOf: url))
+        let data = try Data(contentsOf: url)
+        let decoded: Document
+        if let document = try? JSONDecoder().decode(Document.self, from: data) {
+            decoded = document
+        } else if let legacyRoot = try? JSONDecoder().decode(MindNode.self, from: data) {
+            // Documents saved before group annotations stored the bare root node.
+            decoded = Document(root: legacyRoot, annotations: [])
+        } else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         recordUndo()
-        root = decoded
-        selectedID = decoded.id
-        requestFocus(on: decoded.id)
+        root = decoded.root
+        annotations = decoded.annotations
+        selectedID = decoded.root.id
+        requestFocus(on: decoded.root.id)
     }
 
     private func find(_ id: UUID, in node: MindNode) -> MindNode? {
@@ -545,6 +769,18 @@ final class MindMapStore: ObservableObject {
         }
 
         return search(root)
+    }
+
+    /// Parent lookup against a working tree being assembled by a multi-move.
+    private func parent(of childID: UUID, in tree: MindNode) -> MindNode? {
+        func search(_ node: MindNode) -> MindNode? {
+            if node.children.contains(where: { $0.id == childID }) { return node }
+            for child in node.children {
+                if let result = search(child) { return result }
+            }
+            return nil
+        }
+        return search(tree)
     }
 
     private func contains(_ id: UUID, in node: MindNode) -> Bool {

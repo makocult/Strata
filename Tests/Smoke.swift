@@ -145,15 +145,17 @@ import AppKit
   assert(clipboard.string(forType: .string) == exported)
   print("PASS: clipboard round trip, preview dismissal and success feedback")
   for orientation in [StrataLayoutOrientation.horizontal, .vertical] {
-   for placement in [DropPlacement.before, .after] {
+   // Only the below-side insertion zone remains; hovering above or at the
+   // middle of the card now means "drop inside" as a child.
+   for placement in [DropPlacement.inside, .after] {
     let holder = MindNode(title: "Holder", children: [moving])
     dragStore.root = MindNode(title: "Root", children: [holder, target])
     dragCanvas.orientation = orientation; dragCanvas.refresh(); dragCanvas.centerRoot()
     let sourceRect = dragCanvas.card(moving.id)!
     let targetRect = dragCanvas.card(target.id)!
     let point = orientation == .horizontal
-     ? CGPoint(x: targetRect.midX, y: placement == .before ? targetRect.minY - 4 : targetRect.maxY + 4)
-     : CGPoint(x: placement == .before ? targetRect.minX - 4 : targetRect.maxX + 4, y: targetRect.midY)
+     ? CGPoint(x: targetRect.midX, y: placement == .inside ? targetRect.midY : targetRect.maxY + 4)
+     : CGPoint(x: placement == .inside ? targetRect.midX : targetRect.maxX + 4, y: targetRect.midY)
     mouse(.leftMouseDown, CGPoint(x: sourceRect.midX, y: sourceRect.midY))
     mouse(.leftMouseDragged, point)
     assert(dragCanvas.drop?.0 == target.id && dragCanvas.drop?.1 == placement)
@@ -164,8 +166,8 @@ import AppKit
     let screenGhost = dragCanvas.convert(ghost, to: nil)
     mouse(.leftMouseUp, point)
     assert(dragCanvas.convert(dragCanvas.card(moving.id)!, to: nil) == screenGhost, "Release must land exactly on the placeholder")
-    let expected = placement == .before ? [holder.id, moving.id, target.id] : [holder.id, target.id, moving.id]
-    assert(dragStore.root.children.map(\.id) == expected)
+    assert((placement == .inside && dragStore.node(target.id)?.children.map(\.id) == [moving.id] && dragStore.node(holder.id)?.children.isEmpty == true)
+        || (placement == .after && dragStore.root.children.map(\.id) == [holder.id, target.id, moving.id]))
    }
    dragStore.root = MindNode(title: "Root", children: [moving, target])
    dragCanvas.refresh(); dragCanvas.centerRoot()

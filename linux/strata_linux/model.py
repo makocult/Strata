@@ -226,7 +226,11 @@ class Store:
             raise
 
     def open(self, path):
-        with open(path, encoding="utf-8") as f: checked = validate_tree(json.load(f))
+        with open(path, encoding="utf-8") as f: data = json.load(f)
+        # Newer macOS documents wrap the tree with group annotations.
+        if isinstance(data, dict) and "root" in data and "children" not in data:
+            data = data["root"]
+        checked = validate_tree(data)
         self._record(); self.root = checked; self.selected = checked["id"]; self.selection = {checked["id"]}
 
     def text_export(self) -> str:
